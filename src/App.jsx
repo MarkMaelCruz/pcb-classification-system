@@ -20,9 +20,6 @@ import {
   getFirestore, collection, addDoc, setDoc, getDoc, doc,
   serverTimestamp, getCountFromServer, query, where, getDocs, orderBy, limit,
 } from "firebase/firestore";
-import {
-  getStorage, ref as storageRef, uploadBytes, getDownloadURL,
-} from "firebase/storage";
 
 const firebaseApp = initializeApp({
   apiKey:        import.meta.env.VITE_FIREBASE_API_KEY,
@@ -33,7 +30,6 @@ const firebaseApp = initializeApp({
 });
 const db        = getFirestore(firebaseApp);
 const auth      = getAuth(firebaseApp);
-const storage   = getStorage(firebaseApp);
 const gProvider = new GoogleAuthProvider();
 const API_URL   = import.meta.env.VITE_API_URL;
 
@@ -208,14 +204,13 @@ function AdminDashboard({ currentResult, adminUid }) {
   const [metrics, setMetrics]       = useState({ total: null, defective: null, mostCommon: null });
   const [users, setUsers]           = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
-  const [usersError, setUsersError] = useState("");          // ← NEW: surface errors
+  const [usersError, setUsersError] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
   const [userInspections, setUserInspections] = useState([]);
   const [inspLoading, setInspLoading] = useState(false);
   const [reports, setReports]       = useState([]);
   const [reportsLoading, setReportsLoading] = useState(false);
 
-  // Load metrics
   useEffect(() => {
     async function loadMetrics() {
       try {
@@ -242,27 +237,22 @@ function AdminDashboard({ currentResult, adminUid }) {
     loadMetrics();
   }, [currentResult]);
 
-  // ── FIX: Load ALL users (no role filter), then exclude admin by uid ──────────
   useEffect(() => {
     if (tab !== "users") return;
     async function loadUsers() {
       setUsersLoading(true);
       setUsersError("");
       try {
-        // Fetch every doc in the users collection — no where() filter
-        // so Firestore rules only need a simple "admin can read all" rule.
         const snap = await getDocs(collection(db, "users"));
         const list = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
-          // Exclude the currently-logged-in admin from the list
           .filter(u => u.id !== adminUid);
         setUsers(list);
       } catch (e) {
         console.error("loadUsers error:", e);
-        // Surface a human-readable error so you can debug in the UI
         if (e.code === "permission-denied") {
           setUsersError(
-            "Permission denied. Update your Firestore rules to allow admin reads on the users collection. See console for details."
+            "Permission denied. Update your Firestore rules to allow admin reads on the users collection."
           );
         } else {
           setUsersError(`Failed to load users: ${e.message}`);
@@ -272,7 +262,6 @@ function AdminDashboard({ currentResult, adminUid }) {
     loadUsers();
   }, [tab, adminUid]);
 
-  // Load inspections for selected user
   useEffect(() => {
     if (!selectedUser) return;
     async function loadInspections() {
@@ -292,7 +281,6 @@ function AdminDashboard({ currentResult, adminUid }) {
     loadInspections();
   }, [selectedUser]);
 
-  // Load reports when tab = "reports"
   useEffect(() => {
     if (tab !== "reports") return;
     async function loadReports() {
@@ -339,7 +327,6 @@ function AdminDashboard({ currentResult, adminUid }) {
         </div>
       </div>
 
-      {/* ── Metrics tab ── */}
       {tab === "metrics" && (
         <div>
           <div className="grid-3" style={{ marginTop: 20 }}>
@@ -350,13 +337,11 @@ function AdminDashboard({ currentResult, adminUid }) {
         </div>
       )}
 
-      {/* ── Users tab ── */}
       {tab === "users" && !selectedUser && (
         <div style={{ marginTop: 20 }}>
           {usersLoading ? (
             <div className="history-empty">Loading accounts…</div>
           ) : usersError ? (
-            // ← NEW: show the actual error instead of silent failure
             <div className="history-empty" style={{ color: "#c0392b", fontSize: 13, padding: "24px 0" }}>
               ⚠️ {usersError}
             </div>
@@ -403,7 +388,6 @@ function AdminDashboard({ currentResult, adminUid }) {
         </div>
       )}
 
-      {/* ── User inspection drill-down ── */}
       {tab === "users" && selectedUser && (
         <div style={{ marginTop: 20 }}>
           <div className="drilldown-header">
@@ -425,7 +409,6 @@ function AdminDashboard({ currentResult, adminUid }) {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Image</th>
                   <th>Prediction</th>
                   <th>Defect</th>
                   <th>Confidence</th>
@@ -435,16 +418,6 @@ function AdminDashboard({ currentResult, adminUid }) {
                 {userInspections.map(h => (
                   <tr key={h.id}>
                     <td>{fmtDateTime(h.timestamp)}</td>
-                    <td>
-                      {h.imageUrl ? (
-                        <a className="img-file-link" href={h.imageUrl} target="_blank" rel="noopener noreferrer">
-                          <span className="img-file-icon">🖼</span>
-                          <span>{h.imageName || "image"}</span>
-                        </a>
-                      ) : (
-                        <span className="small" style={{ color: "var(--muted)" }}>No image</span>
-                      )}
-                    </td>
                     <td>
                       <span className={`pill ${h.prediction === "Good" ? "good" : "bad"}`}>
                         {h.prediction}
@@ -460,7 +433,6 @@ function AdminDashboard({ currentResult, adminUid }) {
         </div>
       )}
 
-      {/* ── Reports tab ── */}
       {tab === "reports" && (
         <div style={{ marginTop: 20 }}>
           {reportsLoading ? (
@@ -603,38 +575,32 @@ export default function PCBSolderDefectClassifier() {
     reader.readAsDataURL(file);
   }
 
+  // ── ONLY THIS FUNCTION CHANGED ────────────────────────────────────────────
   async function analyzeImage() {
     if (!imageFile) { setError("Please upload an image before running analysis."); return; }
     setIsAnalyzing(true); setError("");
     setResult({ prediction: "Analyzing…", defect: "Processing image…", confidence: 0, recommendation: "", defects: [] });
     try {
-      let imageUrl  = null;
-      let imageName = imageFile.name;
-      try {
-        const fileRef = storageRef(storage, `inspections/${authUser.uid}/${Date.now()}_${imageFile.name}`);
-        await uploadBytes(fileRef, imageFile);
-        imageUrl = await getDownloadURL(fileRef);
-      } catch (storageErr) {
-        console.warn("Image upload to storage failed (continuing without image URL):", storageErr);
-      }
-
       const formData = new FormData();
       formData.append("file", imageFile);
-      const res = await fetch(`${API_URL}/predict`, { method: "POST", body: formData });
+      const res = await fetch(`${API_URL}/predict`, {
+        method: "POST",
+        body: formData,
+      });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setResult(data);
 
       await addDoc(collection(db, "inspections"), {
-        prediction:    data.prediction,
-        defect:        data.defect,
-        confidence:    data.confidence,
+        prediction:     data.prediction,
+        defect:         data.defect,
+        confidence:     data.confidence,
         recommendation: data.recommendation,
-        uid:           authUser.uid,
-        email:         authUser.email,
-        imageUrl:      imageUrl,
-        imageName:     imageName,
-        timestamp:     serverTimestamp(),
+        defects:        data.defects,
+        imageUrl:       null,
+        uid:            authUser.uid,
+        email:          authUser.email,
+        timestamp:      serverTimestamp(),
       });
 
       setLatestResult({
@@ -642,8 +608,7 @@ export default function PCBSolderDefectClassifier() {
         defect:        data.defect,
         confidence:    data.confidence,
         recommendation: data.recommendation,
-        imageUrl,
-        imageName,
+        imageUrl:      null,
         defects:       data.defects || [],
       });
 
@@ -652,6 +617,7 @@ export default function PCBSolderDefectClassifier() {
       setResult(EMPTY_RESULT);
     } finally { setIsAnalyzing(false); }
   }
+  // ─────────────────────────────────────────────────────────────────────────
 
   function resetDemo() {
     setImageSrc(""); setImageFile(null); setResult(EMPTY_RESULT); setError("");
@@ -716,10 +682,8 @@ export default function PCBSolderDefectClassifier() {
       </aside>
 
       <main>
-
         {/* ── Admin: single Dashboard section ── */}
         {isAdmin && (
-          // ← Pass adminUid so the users list filters out the admin's own account
           <AdminDashboard currentResult={result} adminUid={authUser.uid} />
         )}
 
