@@ -1,0 +1,97 @@
+name: Deploy backend
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: cloud-run-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.event == 'push'
+      )
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - name: Check out the exact tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - name: Authenticate to Google Cloud without a JSON key
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push commit-tagged image
+        env:
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/pcb-api:${{ env.DEPLOY_SHA }}
+        run: |
+          docker build --tag "${IMAGE}" ./backend
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Deploy Cloud Run revision
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          service: ${{ env.CLOUD_RUN_SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE }}
+          env_vars: |-
+            FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }}
+            REQUIRE_AUTH=true
+            SAVE_RESULTS_TO_FIRESTORE=true
+            ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}
+          flags: >-
+            --allow-unauthenticated
+            --service-account=${{ vars.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
+            --memory=1Gi
+            --cpu=1
+            --min-instances=0
+            --max-instances=3
+            --timeout=120
+
+      - name: Check deployed health endpoint
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          curl --fail \
+            --retry 10 \
+            --retry-delay 3 \
+            --retry-all-errors \
+            "${SERVICE_URL}/health"
+
+      - name: Print deployed URL
+        run: 'echo "Cloud Run URL: ${{ steps.deploy.outputs.url }}"'

@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+  backend:
+    name: Backend CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Run backend tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: python -m pytest backend/tests -q
+
+  container:
+    name: Container CI
+    runs-on: ubuntu-latest
+    needs: backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t pcb-api-ci ./backend
+
+      - name: Start backend container
+        run: |
+          docker run --detach \
+            --name pcb-api-ci \
+            --publish 8080:8080 \
+            --env REQUIRE_AUTH=false \
+            --env SAVE_RESULTS_TO_FIRESTORE=false \
+            --env ALLOWED_ORIGINS=http://localhost:5173 \
+            pcb-api-ci
+
+      - name: Check container health endpoint
+        run: |
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8080/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs pcb-api-ci
+          exit 1
+
+      - name: Show container logs
+        if: always()
+        run: docker logs pcb-api-ci || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm --force pcb-api-ci || true
