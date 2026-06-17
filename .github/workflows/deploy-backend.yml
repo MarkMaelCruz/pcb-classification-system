@@ -77,7 +77,7 @@ jobs:
             FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }}
             REQUIRE_AUTH=true
             SAVE_RESULTS_TO_FIRESTORE=true
-            ALLOWED_ORIGINS="${{ vars.ALLOWED_ORIGINS }}"
+            ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}
 
           env_vars_update_strategy: overwrite
 
