@@ -34,11 +34,11 @@ jobs:
       REGION: ${{ vars.GCP_REGION }}
       GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
       CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
     steps:
       - name: Check out the exact tested commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ env.DEPLOY_SHA }}
 
@@ -50,6 +50,8 @@ jobs:
 
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -66,14 +68,19 @@ jobs:
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v3
         with:
+          project_id: ${{ env.PROJECT_ID }}
           service: ${{ env.CLOUD_RUN_SERVICE }}
           region: ${{ env.REGION }}
           image: ${{ env.IMAGE }}
+
           env_vars: |-
             FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }}
             REQUIRE_AUTH=true
             SAVE_RESULTS_TO_FIRESTORE=true
-            ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}
+            ALLOWED_ORIGINS="${{ vars.ALLOWED_ORIGINS }}"
+
+          env_vars_update_strategy: overwrite
+
           flags: >-
             --allow-unauthenticated
             --service-account=${{ vars.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
@@ -92,6 +99,39 @@ jobs:
             --retry-delay 3 \
             --retry-all-errors \
             "${SERVICE_URL}/health"
+
+      - name: Check deployed CORS configuration
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+        run: |
+          VERCEL_ORIGIN="${ALLOWED_ORIGINS##*,}"
+          VERCEL_ORIGIN="$(printf '%s' "${VERCEL_ORIGIN}" | xargs)"
+
+          if [[ "${VERCEL_ORIGIN}" != https://*.vercel.app ]]; then
+            echo "ALLOWED_ORIGINS does not end with a Vercel production origin."
+            echo "Current value: ${ALLOWED_ORIGINS}"
+            exit 1
+          fi
+
+          curl --fail \
+            --silent \
+            --show-error \
+            --request OPTIONS \
+            --header "Origin: ${VERCEL_ORIGIN}" \
+            --header "Access-Control-Request-Method: POST" \
+            --header "Access-Control-Request-Headers: authorization,content-type" \
+            --dump-header cors-headers.txt \
+            --output /dev/null \
+            "${SERVICE_URL}/predict"
+
+          cat cors-headers.txt
+
+          grep \
+            --fixed-strings \
+            --ignore-case \
+            "access-control-allow-origin: ${VERCEL_ORIGIN}" \
+            cors-headers.txt
 
       - name: Print deployed URL
         run: 'echo "Cloud Run URL: ${{ steps.deploy.outputs.url }}"'
