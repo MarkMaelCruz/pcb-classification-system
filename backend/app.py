@@ -60,11 +60,17 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     CORS(
         app,
         resources={
-            r"/health": {"origins": "*"},
-            r"/predict": {"origins": app.config["ALLOWED_ORIGINS"]},
+            r"/.*": {
+                "origins": app.config["ALLOWED_ORIGINS"],
+                "allow_headers": ["Authorization", "Content-Type"],
+                "methods": ["GET", "POST", "OPTIONS"],
+            }
         },
-        allow_headers=["Authorization", "Content-Type"],
-        methods=["GET", "POST", "OPTIONS"],
+    )
+
+    logger.info(
+    "Configured CORS origins: %s",
+    app.config["ALLOWED_ORIGINS"],
     )
 
     if app.config["REQUIRE_AUTH"] or app.config["SAVE_RESULTS_TO_FIRESTORE"]:

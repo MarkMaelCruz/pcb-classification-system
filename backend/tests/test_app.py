@@ -62,3 +62,27 @@ def test_predict_rejects_file_larger_than_10_mb(client):
         content_type="multipart/form-data",
     )
     assert response.status_code == 413
+
+
+def test_predict_preflight_allows_configured_origin(client):
+    origin = "http://localhost:5173"
+
+    response = client.options(
+        "/predict",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+
+    assert response.status_code in {200, 204}
+    assert response.headers.get("Access-Control-Allow-Origin") == origin
+
+    allowed_headers = response.headers.get(
+        "Access-Control-Allow-Headers",
+        "",
+    ).lower()
+
+    assert "authorization" in allowed_headers
+    assert "content-type" in allowed_headers
