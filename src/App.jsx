@@ -470,8 +470,6 @@ export default function PCBSolderDefectClassifier() {
   const [result, setResult]             = useState(EMPTY_RESULT);
   const [latestResult, setLatestResult] = useState(null);
   const [error, setError]               = useState("");
-  const [history, setHistory]           = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [reportMsg, setReportMsg]       = useState("");
   const [reportStatus, setReportStatus] = useState("");
 
@@ -502,7 +500,7 @@ export default function PCBSolderDefectClassifier() {
     await signOut(auth);
     setAuthUser(null); setUserRole(null);
     setResult(EMPTY_RESULT); setImageSrc(""); setImageFile(null);
-    setHistory([]); setReportMsg(""); setReportStatus("");
+     setReportMsg(""); setReportStatus("");
     setLatestResult(null);
   }
 
@@ -520,28 +518,27 @@ export default function PCBSolderDefectClassifier() {
         setLatestResult({ id: snap.docs[0].id, ...snap.docs[0].data() });
       }
     } catch (e) { console.error(e); }
-  }, [authUser]);
+  }, [authUser]); 
 
-  const loadHistory = useCallback(async () => {
-    if (!authUser) return;
-    setHistoryLoading(true);
-    try {
-      const q = query(
-        collection(db, "inspections"),
-        where("uid", "==", authUser.uid),
-        orderBy("timestamp", "desc"),
-        limit(20)
-      );
-      const snap = await getDocs(q);
-      setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (e) {
-      console.error("History query failed:", e);
-    } finally { setHistoryLoading(false); }
-  }, [authUser]);
+    useEffect(() => {
+      let cancelled = false;
 
-  useEffect(() => {
-    if (activeSection === "detection" && userRole !== "admin") loadLatestResult();
-  }, [activeSection, loadLatestResult, userRole]);
+      const loadResult = async () => {
+        await Promise.resolve();
+
+        if (!cancelled) {
+          await loadLatestResult();
+        }
+      };
+
+      if (activeSection === "detection" && userRole !== "admin") {
+        void loadResult();
+      }
+
+      return () => {
+        cancelled = true;
+      };
+    }, [activeSection, loadLatestResult, userRole]);
 
   useEffect(() => {
     const navItems = userRole === "admin" ? ADMIN_NAV : USER_NAV;
@@ -581,29 +578,24 @@ export default function PCBSolderDefectClassifier() {
     setIsAnalyzing(true); setError("");
     setResult({ prediction: "Analyzing…", defect: "Processing image…", confidence: 0, recommendation: "", defects: [] });
     try {
-      const formData = new FormData();
-      formData.append("file", imageFile);
-      const res = await fetch(`${API_URL}/predict`, {
-        method: "POST",
-        body: formData,
-      });
+      if (!API_URL) {
+      throw new Error("VITE_API_URL is not configured.");
+    }
+
+    const formData = new FormData();
+    formData.append("file", imageFile);
+
+    const idToken = await authUser.getIdToken();
+    const res = await fetch(`${API_URL}/predict`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: formData,
+    });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setResult(data);
-
-      await addDoc(collection(db, "inspections"), {
-        prediction:     data.prediction,
-        defect:         data.defect,
-        confidence:     data.confidence,
-        recommendation: data.recommendation,
-        defects:        data.defects,
-        imageUrl:       null,
-        uid:            authUser.uid,
-        email:          authUser.email,
-        timestamp:      serverTimestamp(),
-      });
-
-      setLatestResult({
+      setResult(data); setLatestResult({
         prediction:    data.prediction,
         defect:        data.defect,
         confidence:    data.confidence,
@@ -814,7 +806,7 @@ export default function PCBSolderDefectClassifier() {
             <p style={{ marginTop: 12 }}>
               This system uses a trained convolutional neural network to classify PCB solder
               joint images into defect categories including Solder Bridge, Insufficient Solder,
-              Excess Solder, Solder Spike, and No Defect. Images are processed by a FastAPI
+              Excess Solder, Solder Spike, and No Defect. Images are processed by a Flask
               backend hosted in a Docker container, results are stored in Firebase Firestore,
               and the dashboard metrics are derived from live inspection history.
             </p>
