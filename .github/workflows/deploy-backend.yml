@@ -19,6 +19,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to Cloud Run
+
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
@@ -26,6 +27,7 @@ jobs:
         github.event.workflow_run.head_branch == 'main' &&
         github.event.workflow_run.event == 'push'
       )
+
     runs-on: ubuntu-latest
     environment: production
 
@@ -54,14 +56,21 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+        run: |
+          gcloud auth configure-docker \
+            "${REGION}-docker.pkg.dev" \
+            --quiet
 
       - name: Build and push commit-tagged image
         env:
           IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/pcb-api:${{ env.DEPLOY_SHA }}
         run: |
-          docker build --tag "${IMAGE}" ./backend
+          docker build \
+            --tag "${IMAGE}" \
+            ./backend
+
           docker push "${IMAGE}"
+
           echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
 
       - name: Deploy Cloud Run revision
@@ -78,6 +87,10 @@ jobs:
             REQUIRE_AUTH=true
             SAVE_RESULTS_TO_FIRESTORE=true
             ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}
+            INFERENCE_PROVIDER=${{ vars.INFERENCE_PROVIDER }}
+            HF_PREDICT_URL=${{ vars.HF_PREDICT_URL }}
+            HF_REQUEST_TIMEOUT_SECONDS=${{ vars.HF_REQUEST_TIMEOUT_SECONDS }}
+            MODEL_VERSION=${{ vars.MODEL_VERSION }}
 
           env_vars_update_strategy: overwrite
 
@@ -88,7 +101,7 @@ jobs:
             --cpu=1
             --min-instances=0
             --max-instances=3
-            --timeout=120
+            --timeout=240
 
       - name: Check deployed health endpoint
         env:
@@ -134,4 +147,5 @@ jobs:
             cors-headers.txt
 
       - name: Print deployed URL
-        run: 'echo "Cloud Run URL: ${{ steps.deploy.outputs.url }}"'
+        run: |
+          echo "Cloud Run URL: ${{ steps.deploy.outputs.url }}"
