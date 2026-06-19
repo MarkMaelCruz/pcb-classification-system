@@ -78,6 +78,10 @@ jobs:
             REQUIRE_AUTH=true
             SAVE_RESULTS_TO_FIRESTORE=true
             ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}
+            INFERENCE_PROVIDER=${{ vars.INFERENCE_PROVIDER }}
+            HF_PREDICT_URL=${{ vars.HF_PREDICT_URL }}
+            HF_REQUEST_TIMEOUT_SECONDS=${{ vars.HF_REQUEST_TIMEOUT_SECONDS }}
+            MODEL_VERSION=${{ vars.MODEL_VERSION }}
 
           env_vars_update_strategy: overwrite
 
@@ -88,7 +92,7 @@ jobs:
             --cpu=1
             --min-instances=0
             --max-instances=3
-            --timeout=120
+            --timeout=240
 
       - name: Check deployed health endpoint
         env:
@@ -132,6 +136,14 @@ jobs:
             --ignore-case \
             "access-control-allow-origin: ${VERCEL_ORIGIN}" \
             cors-headers.txt
+
+      - name: Check Hugging Face inference configuration
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          curl --fail --silent --show-error "${SERVICE_URL}/health" > health.json
+          cat health.json
+          grep --fixed-strings '"inferenceProvider":"huggingface"' health.json
 
       - name: Print deployed URL
         run: 'echo "Cloud Run URL: ${{ steps.deploy.outputs.url }}"'
