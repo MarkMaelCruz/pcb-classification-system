@@ -5,7 +5,6 @@ function formatDateTime(value) {
 
   if (typeof value === "string") {
     const parsed = new Date(value);
-
     if (!Number.isNaN(parsed.getTime())) {
       return parsed.toLocaleString("en-PH", {
         month: "short",
@@ -15,7 +14,6 @@ function formatDateTime(value) {
         minute: "2-digit",
       });
     }
-
     return value;
   }
 
@@ -34,11 +32,8 @@ function formatDateTime(value) {
 
 function formatConfidence(value) {
   if (value === null || value === undefined || value === "") return "—";
-
   const numberValue = Number(value);
-
   if (Number.isNaN(numberValue)) return "—";
-
   return `${numberValue.toFixed(2).replace(/\.00$/, "")}%`;
 }
 
@@ -64,7 +59,6 @@ export default function HistoryPanel({ authUser, apiUrl }) {
 
     try {
       const token = await authUser.getIdToken();
-
       const response = await fetch(`${apiUrl}/inspections`, {
         method: "GET",
         headers: {
@@ -79,13 +73,12 @@ export default function HistoryPanel({ authUser, apiUrl }) {
       }
 
       const loadedRecords = payload.records || [];
-      const nextDrafts = {};
+      setRecords(loadedRecords);
 
+      const nextDrafts = {};
       loadedRecords.forEach((record) => {
         nextDrafts[record.id] = record.remarks || "";
       });
-
-      setRecords(loadedRecords);
       setRemarksDrafts(nextDrafts);
     } catch (err) {
       setError(err.message || "Failed to load inspection history.");
@@ -101,9 +94,7 @@ export default function HistoryPanel({ authUser, apiUrl }) {
       void loadHistory();
     }, 0);
 
-    return () => {
-      window.clearTimeout(timerId);
-    };
+    return () => window.clearTimeout(timerId);
   }, [canLoad, loadHistory]);
 
   async function saveRemarks(recordId) {
@@ -115,7 +106,6 @@ export default function HistoryPanel({ authUser, apiUrl }) {
 
     try {
       const token = await authUser.getIdToken();
-
       const response = await fetch(`${apiUrl}/inspections/${recordId}/remarks`, {
         method: "PATCH",
         headers: {
@@ -152,38 +142,38 @@ export default function HistoryPanel({ authUser, apiUrl }) {
   }
 
   return (
-    <section id="history" className="section history-section">
-      <div className="section-head">
+    <section className="card" id="history">
+      <div className="card-header">
         <div>
           <h3>Inspection History</h3>
           <p>View your previous PCB analyses and add notes or remarks per record.</p>
         </div>
-        <span className="pill">History</span>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button className="btn outline btn-sm" type="button" onClick={loadHistory} disabled={loading}>
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+          <span className="badge">History</span>
+        </div>
       </div>
 
-      <div className="history-toolbar">
-        <button className="btn" type="button" onClick={loadHistory} disabled={loading}>
-          {loading ? "Loading…" : "Refresh History"}
-        </button>
-        <span className="history-count">{records.length} record(s)</span>
-      </div>
-
-      {error && <div className="error-text">{error}</div>}
+      {error && <p className="error-msg">{error}</p>}
       {status && <div className="report-status">{status}</div>}
 
       {loading ? (
-        <div className="empty-state">Loading your inspection records…</div>
+        <div className="history-empty">Loading your inspection records…</div>
       ) : records.length === 0 ? (
-        <div className="empty-state">
-          <strong>No inspection records yet.</strong>
-          <p>Analyze a PCB image first, then return to this History tab.</p>
+        <div className="history-empty">
+          No inspection records yet.
+          <p className="small" style={{ marginTop: 8 }}>
+            Analyze a PCB image first, then return to this History tab.
+          </p>
         </div>
       ) : (
-        <div className="history-table-wrap">
+        <div style={{ overflowX: "auto" }}>
           <table className="history-table">
             <thead>
               <tr>
-                <th>Date and Time</th>
+                <th>Date</th>
                 <th>Prediction</th>
                 <th>Defect</th>
                 <th>Confidence</th>
@@ -197,17 +187,22 @@ export default function HistoryPanel({ authUser, apiUrl }) {
               {records.map((record) => (
                 <tr key={record.id}>
                   <td>{formatDateTime(record.timestamp)}</td>
-                  <td>{record.prediction || "—"}</td>
+                  <td>
+                    <span className={`pill ${record.prediction === "No Defect" || record.prediction === "Good" ? "good" : "bad"}`}>
+                      {record.prediction || "—"}
+                    </span>
+                  </td>
                   <td>{record.defect || "—"}</td>
                   <td>{formatConfidence(record.confidence)}</td>
                   <td>{record.modelVersion || "—"}</td>
                   <td>{record.detectionCount ?? record.defects?.length ?? 0}</td>
-                  <td>
+                  <td style={{ minWidth: 260 }}>
                     <textarea
-                      className="remarks-input"
+                      className="report-field"
                       value={remarksDrafts[record.id] || ""}
                       maxLength={500}
                       placeholder="Add note or remark…"
+                      style={{ minHeight: 82, marginTop: 0 }}
                       onChange={(event) =>
                         setRemarksDrafts((current) => ({
                           ...current,
@@ -215,13 +210,13 @@ export default function HistoryPanel({ authUser, apiUrl }) {
                         }))
                       }
                     />
-                    <div className="remarks-meta">
+                    <p className="small" style={{ marginTop: 4 }}>
                       {(remarksDrafts[record.id] || "").length}/500 characters
-                    </div>
+                    </p>
                   </td>
                   <td>
                     <button
-                      className="btn btn-small"
+                      className="btn outline btn-sm"
                       type="button"
                       onClick={() => saveRemarks(record.id)}
                       disabled={savingId === record.id}
