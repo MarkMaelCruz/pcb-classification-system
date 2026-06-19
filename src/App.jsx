@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
+import HistoryPanel from "./HistoryPanel.jsx";
 import { initializeApp } from "firebase/app";
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
@@ -49,6 +50,7 @@ const USER_NAV = [
   { id: "home",      label: "Home" },
   { id: "upload",    label: "Upload" },
   { id: "detection", label: "Detection Output" },
+  { id: "history",   label: "History" },
   { id: "about",     label: "About" },
   { id: "report",    label: "Report" },
 ];
@@ -798,6 +800,12 @@ export default function PCBSolderDefectClassifier() {
             </div>
           </section>
         )}
+
+        {/* ── User: History ── */}
+        {!isAdmin && (
+          <HistoryPanel authUser={authUser} apiUrl={API_URL} />
+        )}
+
 
         {/* ── User: About ── */}
         {!isAdmin && (
